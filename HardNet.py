@@ -122,7 +122,8 @@ def hardnet(input_img, is_training = False):
         blk = hardblock(x, cur_channels_count, gr[i], grmul, n_layers[i])
 
     x = conv_layer(x, depth = 1, kernel_size = 1)
-    x = tf.nn.sigmoid(x, name = 'prob')
+    #x = tf.nn.sigmoid(x, name = 'prob')
+    x = tf.image.resize_bilinear(x, (tf.shape(input_img)[1], tf.shape(input_img)[2]))
     return x
 
 tf.reset_default_graph()
