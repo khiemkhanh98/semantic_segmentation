@@ -3,3 +3,13 @@
 ################################################################################
 
 /.vs
+*.tfrecords
+*,jpg
+*.png
+checkpoint/
+log/
+rgb/
+label/
+img_for_tfrecords/
+*.txt
+*.pyc

@@ -1,9 +1,10 @@
 import tensorflow as tf
 import numpy as np
 import time
+import tensorflow.contrib.slim as slim
 
 l2 = 1e-4
-a = 0
+
 def get_link(layer, base_ch, growth_rate, grmul):
     if layer == 0:
         return base_ch, 0, []
@@ -23,9 +24,6 @@ def get_link(layer, base_ch, growth_rate, grmul):
     return out_channels, link
 
 def conv(x, depth, kernel_size=3, strides=1, padding = 'same'):
-    global a
-    a=a+1
-    print(a)
     return tf.layers.conv2d(x, depth, (kernel_size,kernel_size), (strides,strides), padding= padding,
                            kernel_regularizer=tf.contrib.layers.l2_regularizer(l2),kernel_initializer = tf.initializers.he_uniform(seed = 1))
 
@@ -49,6 +47,7 @@ def conv_layer(x, depth, kernel_size=3, strides=1, dropout_rate=0.1, is_training
     x = batch_norm(x, is_training)
     x = relu(x)
     x = drop_out(x, rate = (dropout_rate), is_training = is_training)
+    
     return x
 
 def hardblock(x, in_channels, growth_rate, grmul, n_layers):
@@ -57,22 +56,18 @@ def hardblock(x, in_channels, growth_rate, grmul, n_layers):
     layers.append(x)
     out_channels = 0
     
-    for i in range(n_layers):
-        
+    for i in range(n_layers):    
         links = []
         out_ch, link = get_link(i+1, in_channels, growth_rate, grmul)
-        if (i % 2 == 0) or (i == n_layers - 1):
-            out_channels += out_ch
     
-        for i in range(len(link)):
+        for i in link:
             links.append(layers[i])
 
         x = tf.concat(links, axis = -1)
-        layers.append(conv_layer(x, out_channels))
-        
+        layers.append(conv_layer(x, out_ch))   
     
     for i in range(len(layers)):
-        if (i == i-1) or (i%2 == 1):
+        if (i == len(layers)-1) or (i%2 == 1):
             out_layers.append(layers[i])
     
     x = tf.concat(out_layers, axis = -1)
@@ -83,53 +78,48 @@ def transition_up(x, skip_connection):
     x = tf.concat([x, skip_connection], axis = -1)
     return x
 
-def hardnet(input_img, is_training = False):
-    first_ch  = [16,24,32,48]
-    depth_conv1 = [64, 96, 160, 224, 320]
-    grmul = 1.7
-    gr       = [  10,16,18,24,32]
-    n_layers = [   4, 4, 8, 8, 8]
-    up_sample = [126,238,374,534]
-    skip_connections = []
-    blks = len(n_layers)
-    
-    
-    x = conv_layer(input_img, first_ch[0], strides = 2)
-    x = conv_layer(x, first_ch[1])
-    x = conv_layer(x, first_ch[2], strides = 2)
-    x = conv_layer(x, first_ch[3])
-    
-    ch = first_ch[3]
-    for i in range(blks):
-        blk = hardblock(x, ch, gr[i], grmul, n_layers[i])
-        if i < blks-1:
-            skip_connections.append(blk)
-        x = conv_layer(x, depth_conv1[i])
-        if i < blks-1:
-          x = avg_pool(x)
-        ch = depth_conv1[i]
-    
-    cur_channels_count = depth_conv1[len(depth_conv1)-1]
-    n_blocks = blks-1
-    
-    for i in range(n_blocks-1,-1,-1):
-        skip = skip_connections.pop()
+def hardnet(input_img, is_training = False, reuse = False):
+    with tf.variable_scope('hardnet', reuse=reuse):
+        first_ch  = [16,24,32,48]
+        depth_conv1 = [64, 96, 160, 224, 320]
+        grmul = 1.7
+        gr       = [  10,16,18,24,32]
+        n_layers = [   4, 4, 8, 8, 8]
+        up_sample = [126,238,374,534]
+        skip_connections = []
+        blks = len(n_layers)
         
-        x = transition_up(x, skip)
         
-        cur_channels_count = up_sample[i]//2
-        x = conv_layer(x, cur_channels_count, kernel_size=1)
-        blk = hardblock(x, cur_channels_count, gr[i], grmul, n_layers[i])
-
-    x = conv_layer(x, depth = 1, kernel_size = 1)
-    #x = tf.nn.sigmoid(x, name = 'prob')
-    x = tf.image.resize_bilinear(x, (tf.shape(input_img)[1], tf.shape(input_img)[2]))
-    
-    return x
-
-tf.reset_default_graph()
-img = tf.placeholder(shape = (None,None,None,3), dtype = tf.float32, name = 'input')
-sess = tf.Session()
-model = hardnet(input_img = img)
-sess.run(tf.global_variables_initializer())
-sess.run([model], feed_dict={img:np.zeros((1,256,512,3))})
+        x = conv_layer(input_img, first_ch[0], strides = 2)
+        x = conv_layer(x, first_ch[1])
+        x = conv_layer(x, first_ch[2], strides = 2)
+        x = conv_layer(x, first_ch[3])
+        
+        ch = first_ch[3]
+        for i in range(blks):
+            x = hardblock(x, ch, gr[i], grmul, n_layers[i])
+            if i < blks-1:
+                skip_connections.append(x)
+            x = conv_layer(x, depth_conv1[i], kernel_size = 1)
+            if i < blks-1:
+              x = avg_pool(x)
+            ch = depth_conv1[i]
+        
+        cur_channels_count = depth_conv1[len(depth_conv1)-1]
+        n_blocks = blks-1
+        
+        for i in range(n_blocks-1,-1,-1):
+            skip = skip_connections.pop()
+            
+            x = transition_up(x, skip)
+            
+            cur_channels_count = up_sample[i]//2
+            x = conv_layer(x, cur_channels_count, kernel_size=1)
+            x = hardblock(x, cur_channels_count, gr[i], grmul, n_layers[i])
+            
+        x = conv_layer(x, depth = 1, kernel_size = 1)
+        #x = tf.nn.sigmoid(x, name = 'prob')
+        x = resize(x, (tf.shape(input_img)[1], tf.shape(input_img)[2]))
+        x = tf.squeeze(x, axis = -1)
+        
+        return x
