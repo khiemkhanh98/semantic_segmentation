@@ -18,7 +18,6 @@ from models.nukev8_gnorm import build_nukev8
 from utils import utils, helpers
 
 
-from builders import model_builder
 
 import matplotlib.pyplot as plt
 print("change checkpoint 2")

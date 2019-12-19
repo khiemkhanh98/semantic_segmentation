@@ -13,3 +13,4 @@ label/
 img_for_tfrecords/
 *.txt
 *.pyc
+.vscode/
